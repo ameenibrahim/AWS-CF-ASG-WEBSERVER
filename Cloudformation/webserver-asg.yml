@@ -328,7 +328,7 @@ Resources:
             '/etc/init/cfn-hup.conf': 
               content: |
                 author "Modria-Ops"
-                Description=Cloud formation helper daemon
+                description "Cloud formation helper daemon"
                 version "1.0"
                 
                 start on started networking
