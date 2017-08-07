@@ -1,6 +1,21 @@
 # AWS-CF-ASG-WEBSERVER
 This is a cloudformation template to launch a web server under Autoscaling group with scaling a CPU policy
 
+Steps to execute: (without the PY script)
+
+  A. Open Cloudformation Service in AWS console as an IAM elevated user (Power or Admin)
+  B. Select Create stack Option and select the file from disk (select the file https://github.com/ameenibrahim/AWS-CF-ASG-WEBSERVER/blob/master/Cloudformation/webserver-asg.yml)
+  C. Choose from the given options (Description given near the feilds)
+
+  PRE-REQUISTIES
+
+  a. VPC should alreaby be created
+  b. Private subnets should be available with NAT gateway or NAT instance
+  c. Public subnets with IGW should be available
+  d. SSL certificate should be available in AWS Cert manager
+  e. VPN server / Bastion server with sec-grp should be available for SSH 
+  f. SSH Keypairs should be available in EC2 Keypairs
+
 Below is the High level flow of the beta working model. (Design V1)
 ![V2 Design](https://raw.githubusercontent.com/ameenibrahim/AWS-CF-ASG-WEBSERVER/master/Designs/V1-Py-CF-Ansible.jpg)
 
