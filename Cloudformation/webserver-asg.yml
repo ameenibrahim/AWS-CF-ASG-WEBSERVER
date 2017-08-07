@@ -58,9 +58,12 @@ Parameters:
     ConstraintDescription: Enter a valid sec-grp
   
   IsPrivateSubnetNATed:
-    Description: Mention whether the Private subnets selected above are NATed with a NAT Instance (True) or a NAT Gateway (False)
-    Type: Boolean
-    ConstraintDescription: Enter a NAT boolean value
+    Description: Mention whether the Private subnets selected above are NATed with a NAT Instance or a NAT Gateway
+    Type: String
+    AllowedValues:
+      - NAT-INSTANCE
+      - NAT-GATEWAY
+    ConstraintDescription: Invalid NAT Option specified
 
   NATSecGrpID:
     Description: Enter the Source Secuirty group of the NAT server to include the Egress rules (internet access)
@@ -73,7 +76,7 @@ Parameters:
 Conditions:
   # CheckNATGateway: 
   #   Fn::Equals: [ Ref: account, "MAIN" ]
-  CheckNATInstanceIngress: !Ref: IsPrivateSubnetNATed
+  CheckNATInstanceIngress: !Equals [ Ref: IsPrivateSubnetNATed, "NAT-INSTANCE" ]
 
 
 Mappings:
@@ -266,6 +269,8 @@ Resources:
       LaunchConfigurationName: !Ref LaunchConfig
       MinSize: '1'
       MaxSize: '3'
+      HealthCheckType: 'ELB'
+      HealthCheckGracePeriod: 600
       DesiredCapacity: !Ref InstanceCount
       LoadBalancerNames:
         - !Ref StackELB
@@ -337,7 +342,7 @@ Resources:
 
           services:
             sysvinit:
-              httpd:
+              apache2:
                 enabled: 'true'
                 ensureRunning: 'true'
               cfn-hup:
@@ -352,6 +357,7 @@ Resources:
               command: "initctl reload-configuration" 
             start-cfn-hup:
               command: "initctl start cfn-hup"
+
     Properties:
       AssociatePublicIpAddress: 'false'
       ImageId: !FindInMap [ !Ref Region, EC2-Params, Ec2AMIID ]
