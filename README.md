@@ -3,18 +3,18 @@ This is a cloudformation template to launch a web server under Autoscaling group
 
 ## Steps to execute: (without the PY script)
 
-  A. Open Cloudformation Service in AWS console as an IAM elevated user (Power or Admin)
-  B. Select Create stack Option and select the file from disk (select the file https://github.com/ameenibrahim/AWS-CF-ASG-WEBSERVER/blob/master/Cloudformation/webserver-asg.yml)
-  C. Choose from the given options (Description given near the feilds)
-  D. Launch stack and wait for the Site to come up (e.g http://test-3-stackelb-ft01ek9w588v-1053622300.us-east-1.elb.amazonaws.com/)
+  - Open Cloudformation Service in AWS console as an IAM elevated user (Power or Admin)
+  - Select Create stack Option and select the file from disk (select the file https://github.com/ameenibrahim/AWS-CF-ASG-WEBSERVER/blob/master/Cloudformation/webserver-asg.yml)
+  - Choose from the given options (Description given near the feilds)
+  - Launch stack and wait for the Site to come up (e.g http://test-3-stackelb-ft01ek9w588v-1053622300.us-east-1.elb.amazonaws.com/)
   
 ### PRE-REQUISTIES
-  a. VPC should alreaby be created
-  b. Private subnets should be available with NAT gateway or NAT instance
-  c. Public subnets with IGW should be available
-  d. SSL certificate should be available in AWS Cert manager
-  e. VPN server / Bastion server with sec-grp should be available for SSH 
-  f. SSH Keypairs should be available in EC2 Keypairs
+  - VPC should alreaby be created
+  - Private subnets should be available with NAT gateway or NAT instance
+  - Public subnets with IGW should be available
+  - SSL certificate should be available in AWS Cert manager
+  - VPN server / Bastion server with sec-grp should be available for SSH 
+  - SSH Keypairs should be available in EC2 Keypairs
 
 
 ## Design
@@ -39,5 +39,5 @@ Below is the High level flow of the beta working model. (Design V1)
 3. pull the correct code base - pertaining to the tag
 
 ### Note:
-*(deployment time)* > *(autoscaling time)*
-*bake ami steps(configure server + install code)*  **+** *autoscaling steps (bootstrap env variable)* = **deployment steps**
+> *(deployment time)* > *(autoscaling time)*
+> *bake ami steps(configure server + install code)*  **+** *autoscaling steps (bootstrap env variable)* = **deployment steps**
