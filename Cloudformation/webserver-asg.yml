@@ -44,7 +44,7 @@ Parameters:
     Type: 'AWS::EC2::VPC::Id'
     Description: VpcId of your existing Virtual Private Cloud (VPC)
     ConstraintDescription: Select fromt the list of VPC
-    
+
   PrivateSubnets:
     Type: 'List<AWS::EC2::Subnet::Id>'
     Description: The list of Private SubnetIds (NATed) in your Virtual Private Cloud (VPC)
