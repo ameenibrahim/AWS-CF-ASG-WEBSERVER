@@ -270,7 +270,7 @@ Resources:
       MinSize: '1'
       MaxSize: '3'
       HealthCheckType: 'ELB'
-      HealthCheckGracePeriod: 600
+      HealthCheckGracePeriod: 180
       DesiredCapacity: !Ref InstanceCount
       LoadBalancerNames:
         - !Ref StackELB
@@ -283,14 +283,13 @@ Resources:
             - 'autoscaling:EC2_INSTANCE_TERMINATE_ERROR'
     CreationPolicy:
       ResourceSignal:
-        Timeout: PT15M
+        Timeout: PT3M
     UpdatePolicy:
       AutoScalingRollingUpdate:
         MinInstancesInService: '1'
         MaxBatchSize: '1'
-        PauseTime: PT15M
+        PauseTime: PT3M
         WaitOnResourceSignals: 'true'
-
 
   LaunchConfig:
     Type: 'AWS::AutoScaling::LaunchConfiguration'
@@ -298,14 +297,14 @@ Resources:
       AWS::CloudFormation::Init:
         configSets:
           default: 
+            - apache2
             - config-cfn-hup
-            - apache
-        apache:
+        apache2:
           packages:
-            apt: 
+            apt:
               apache2: []
           files:
-            /var/www/html/index.html:
+            '/var/www/html/index.html':
               content: '<h1>Welcome to the Web Server example using Cloudformation</h1>'
               mode: '000644'
               owner: root
@@ -339,7 +338,6 @@ Resources:
                 respawn limit 10 10
 
                 exec /usr/local/bin/cfn-hup
-
           services:
             sysvinit:
               apache2:
@@ -351,12 +349,11 @@ Resources:
                 files:
                   - /etc/cfn/cfn-hup.conf
                   - /etc/cfn/hooks.d/cfn-auto-reloader.conf
-
-          commands: 
-            enable-cfn-hup:
-              command: "initctl reload-configuration" 
-            start-cfn-hup:
-              command: "initctl start cfn-hup"
+          # commands: 
+          #   enable-cfn-hup:
+          #     command: "initctl reload-configuration" 
+          #   start-cfn-hup:
+          #     command: "initctl start cfn-hup"
 
     Properties:
       AssociatePublicIpAddress: 'false'
