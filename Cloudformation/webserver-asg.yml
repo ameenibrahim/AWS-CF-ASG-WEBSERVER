@@ -45,9 +45,16 @@ Parameters:
     Description: VpcId of your existing Virtual Private Cloud (VPC)
     ConstraintDescription: Select fromt the list of VPC
     
-  Subnets:
+  PrivateSubnets:
     Type: 'List<AWS::EC2::Subnet::Id>'
-    Description: The list of SubnetIds in your Virtual Private Cloud (VPC)
+    Description: The list of Private SubnetIds (NATed) in your Virtual Private Cloud (VPC)
+    ConstraintDescription: >-
+      Atleast two existing subnets associated with at least two different availability zones. 
+      They should belong to the selected VPC
+
+  PublicSubnets:
+    Type: 'List<AWS::EC2::Subnet::Id>'
+    Description: The list of Public SubnetIds (IGWed) in your Virtual Private Cloud (VPC)
     ConstraintDescription: >-
       Atleast two existing subnets associated with at least two different availability zones. 
       They should belong to the selected VPC
@@ -189,7 +196,7 @@ Resources:
       SecurityGroups:
         - !Ref StackELBSG
       Subnets: 
-        !Ref Subnets
+        !Ref PublicSubnets
 
 # Uncomment this to add the static Instance
       # Instances:
@@ -265,7 +272,7 @@ Resources:
   Ec2ASGroup:
     Type: 'AWS::AutoScaling::AutoScalingGroup'
     Properties:
-      VPCZoneIdentifier: !Ref Subnets
+      VPCZoneIdentifier: !Ref PrivateSubnets
       LaunchConfigurationName: !Ref LaunchConfig
       MinSize: '1'
       MaxSize: '3'
