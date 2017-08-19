@@ -1,24 +1,26 @@
 # Author: Ameen Ibrahim Raffic
 # Version: 1.1
-# Description: This cfn template creates a web server auto scaling group with apache2 on linux
+# Description: This cfn template creates a web server auto scaling group with apache2 on linux in one region
+#              and IIS in windows in another
 ---
 AWSTemplateFormatVersion: "2010-09-09"
-Description: "EC2 Stack with ELB and S3 Access"
+Description: "HA Website on Apache(linux) + IIS(Windows)"
 
 # All parameters are set during stack creation/update
 Parameters:
-  # Sets the target environment
-  BucketName: 
+
+  # Mention a unique S3 bucket name (The region will be same as CFN execution region)
+  S3BucketName: 
     Description: S3 Bucket Name
     Type: String
-
+  
   # Sets the target region
   Region:
     Description: Region to launch/update the stack
     Type: String
     AllowedValues:
-      - USEAST1
-      - EUWEST1
+      - APSOUTHEAST1
+    Default: "APSOUTHEAST1"
     ConstraintDescription: Invalid region specified
 
   InstanceCount:
@@ -66,44 +68,36 @@ Parameters:
     Description: Enter the Source Secuirty group of the server from which SSH to the EC2 servers should be allowed. Note that the sec group should be a part of the VPC selected above
     Type: 'AWS::EC2::SecurityGroup::Id'
     ConstraintDescription: Enter a valid sec-grp
-  
-  IsPrivateSubnetNATed:
-    Description: Mention whether the Private subnets selected above are NATed with a NAT Instance or a NAT Gateway
+
+  WebServerLocation:
+    Description: Mention whether the the web servers needs to be location in public or private subnets (If private subnet then the administration would be done using a VPN server)
     Type: String
     AllowedValues:
-      - NAT-INSTANCE
-      - NAT-GATEWAY
-    ConstraintDescription: Invalid NAT Option specified
+      - PRIVATE-SUBNET
+      - PUBLIC-SUBNET
+    Default: "PUBLIC-SUBNET"
+    ConstraintDescription: Invalid Location Option specified
 
-  NATSecGrpID:
-    Description: Enter the Source Secuirty group of the NAT server to include the Egress rules (internet access)
-    Type: 'AWS::EC2::SecurityGroup::Id'
-    ConstraintDescription: Enter a valid  NAT sec-grp
-# Mapping to set values based on the incoming parameters
-# Organized by region, then by environment
+  LocalIPAddress:
+    Description: Enter the local static IP address in CIDR notation (for administration purpose) - SSH (e.g 172.4.4.4/32 )
+    Type: String
+    
 
-# The name of the Stack will be configured as <environment>-<product>-<region> for e.g PROD-ECOM-US-EAST-API-01 
+
 Conditions:
-  # CheckNATGateway: 
-  #   Fn::Equals: [ Ref: account, "MAIN" ]
-  CheckNATInstanceIngress: !Equals [ Ref: IsPrivateSubnetNATed, "NAT-INSTANCE" ]
-
+  IsPrivateSubnet: !Equals [ Ref: WebServerLocation, "PRIVATE-SUBNET" ]
+  IsPublicSubnet: !Equals [ Ref: WebServerLocation, "PUBLIC-SUBNET" ]
 
 Mappings:
-  USEAST1:
+  APSOUTHEAST1:
     DisplayName:
-      name: "US-EAST"
-    EC2-Params:
-      Ec2AMIID: "ami-2d39803a"
+      name: "AP-SOUTHEAST"
+    NixEC2Params:
+      Ec2AMIID: "ami-49b5282a"
       Ec2InstanceType: "t2.micro"
-      Ec2InstanceRootVolumeSize: "8"
-  EUWEST1:
-    DisplayName:
-      name: "EU-WEST"
-    EC2-Params:
-      Ec2AMIID: "ami-02b62c71"
+    WinEC2Params:
+      Ec2AMIID: "ami-c922baaa"
       Ec2InstanceType: "t2.micro"
-      Ec2InstanceRootVolumeSize: "8"
 
 # AWS Resource Definitions
 Resources:
@@ -111,6 +105,14 @@ Resources:
   ### A full role is 3 parts: Role, Policy, and Profile
   ### It's reccomended to NOT provide 'RoleName' by AWS Documentation in the ROLE Type
   #
+
+  # ScreenShotS3Bucket:
+  #   Type: AWS::S3::Bucket
+  #   Properties:
+  #     AccessControl: "PublicRead"
+  #     BucketName: !Ref S3BucketName
+  #     VersioningConfiguration:
+  #       Status: Enabled
 
   # API instance Role
   EC2Role:
@@ -177,10 +179,10 @@ Resources:
     Type: "AWS::ElasticLoadBalancing::LoadBalancer"
     Properties: 
       Listeners:
-        - InstancePort: '443'
-          LoadBalancerPort: '443'
-          Protocol: "HTTPS"
-          SSLCertificateId: !Ref SSLCert
+        #- InstancePort: '443'
+        #  LoadBalancerPort: '443'
+        #  Protocol: "HTTPS"
+        #  SSLCertificateId: !Ref SSLCert
         - InstancePort: '80'
           LoadBalancerPort: '80'
           Protocol: "HTTP"
@@ -210,8 +212,9 @@ Resources:
           Value: "Stack-ELB"
 
 
-  # Security Group for the Web EC2 Instances
-  EC2InstanceSG:
+   # Security Group for the Web EC2 Instances (for Private instances)
+  PrivateEC2InstanceSG:
+    Condition: IsPrivateSubnet
     Type: "AWS::EC2::SecurityGroup"
     Properties:
       GroupDescription: !Join [ "-", [ !FindInMap [ !Ref Region, DisplayName, name ], "EC2 Sec Grp" ] ]
@@ -220,6 +223,10 @@ Resources:
         - IpProtocol: tcp
           FromPort: '22'
           ToPort: '22'
+          SourceSecurityGroupId: !Ref VpnSecGrp
+        - IpProtocol: tcp
+          FromPort: '3389'
+          ToPort: '3389'
           SourceSecurityGroupId: !Ref VpnSecGrp
         - IpProtocol: tcp
           FromPort: '443'
@@ -233,14 +240,41 @@ Resources:
         - Key: "Name"
           Value: !Join [ "-", [ !FindInMap [ !Ref Region, DisplayName, name ], "EC2-SEC-GRP" ] ]
 
-  # NAT Ingress Rules for web instances
-  NATSGIngressWeb:
-    Condition: CheckNATInstanceIngress
-    Type: AWS::EC2::SecurityGroupIngress
+  PublicEC2InstanceSG:
+    Condition: IsPublicSubnet
+    Type: "AWS::EC2::SecurityGroup"
     Properties:
-      GroupId: !Ref NATSecGrpID
-      IpProtocol: '-1'
-      SourceSecurityGroupId: !Ref EC2InstanceSG
+      GroupDescription: !Join [ "-", [ !FindInMap [ !Ref Region, DisplayName, name ], "EC2 Sec Grp" ] ]
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '22'
+          ToPort: '22'
+          CidrIp: !Ref LocalIPAddress
+        - IpProtocol: tcp
+          FromPort: '3389'
+          ToPort: '3389'
+          CidrIp: !Ref LocalIPAddress
+        - IpProtocol: tcp
+          FromPort: '443'
+          ToPort: '443'
+          SourceSecurityGroupId: !Ref StackELBSG
+        - IpProtocol: tcp
+          FromPort: '80'
+          ToPort: '80'
+          SourceSecurityGroupId: !Ref StackELBSG
+      Tags:
+        - Key: "Name"
+          Value: !Join [ "-", [ !FindInMap [ !Ref Region, DisplayName, name ], "EC2-SEC-GRP" ] ]
+
+  # # NAT Ingress Rules for web instances (uncomment only if NAT gateway not created with Private subnets)
+  # NATSGIngressWeb:
+  #   Condition: CheckNATInstanceIngress
+  #   Type: AWS::EC2::SecurityGroupIngress
+  #   Properties:
+  #     GroupId: !Ref NATSecGrpID
+  #     IpProtocol: '-1'
+  #     SourceSecurityGroupId: !Ref EC2InstanceSG
 
   # API EC2 Instance 01 (If we need a static EC2 instance)
   # EC201:
@@ -272,13 +306,13 @@ Resources:
         - Endpoint: !Ref NotificationEmailID
           Protocol: email
 
-  Ec2ASGroup:
+  NixEc2ASGroup:
     Type: 'AWS::AutoScaling::AutoScalingGroup'
     Properties:
-      VPCZoneIdentifier: !Ref PrivateSubnets
-      LaunchConfigurationName: !Ref LaunchConfig
+      VPCZoneIdentifier: !Ref PublicSubnets
+      LaunchConfigurationName: !Ref NixLaunchConfig
       MinSize: '1'
-      MaxSize: '3'
+      MaxSize: '2'
       HealthCheckType: 'ELB'
       HealthCheckGracePeriod: 180
       DesiredCapacity: !Ref InstanceCount
@@ -293,32 +327,116 @@ Resources:
             - 'autoscaling:EC2_INSTANCE_TERMINATE_ERROR'
     CreationPolicy:
       ResourceSignal:
-        Timeout: PT3M
+        Timeout: PT60M
     UpdatePolicy:
       AutoScalingRollingUpdate:
         MinInstancesInService: '1'
         MaxBatchSize: '1'
-        PauseTime: PT3M
+        PauseTime: PT60M
         WaitOnResourceSignals: 'true'
 
-  LaunchConfig:
+  NixLaunchConfig:
     Type: 'AWS::AutoScaling::LaunchConfiguration'
     Metadata:
       AWS::CloudFormation::Init:
         configSets:
-          default: 
-            - apache2
+          default:
             - config-cfn-hup
-        apache2:
+            - mountEBS
+            - installPackages
+            - configureApache2
+            - configureGIT
+            - deployCode
+        mountEBS:
+          commands:
+            1checkMakeFSCommand:
+              command: 'sudo file -s /dev/xvdf | grep -v "filesystem" | grep "data" > /dev/null && sudo mkfs -t ext4 /dev/xvdf'
+            2createMountDir:
+              command: 'sudo mkdir -p /webMnt'
+            3mountEBSCommand:
+              command: 'sudo mount /dev/xvdf /webMnt'
+            4backupFSTab:
+              command: 'sudo cp /etc/fstab /etc/fstab.orig'
+            5updateFSTab:
+              command: 'echo "/dev/xvdf /webMnt   ext4    defaults,nofail        0       2" | sudo tee --append /etc/fstab > /dev/null' 
+
+        installPackages:
+          commands:
+            updateApt:
+              command: 'sudo apt-get update'
           packages:
             apt:
               apache2: []
+              git: []
+
+        configureApache2:
           files:
-            '/var/www/html/index.html':
-              content: '<h1>Welcome to the Web Server example using Cloudformation</h1>'
-              mode: '000644'
-              owner: root
-              group: root
+            '/etc/apache2/sites-available/solution-arch.com.conf':
+              content: !Sub |
+                <VirtualHost *:80>
+                  ServerAdmin ameen@solution-arch.com
+                  ServerName solution-arch.com
+                  ServerAlias www.solution-arch.com
+                  DocumentRoot /webMnt/www/html
+                  DirectoryIndex index.php index.html index.htm
+                  <Directory /webMnt/www/html>
+                        Options Indexes FollowSymLinks MultiViews
+                        AllowOverride all
+                        Require all granted
+                  </Directory>
+                  ErrorLog ${!APACHE_LOG_DIR}/error.log
+                  CustomLog ${!APACHE_LOG_DIR}/access.log combined
+                </VirtualHost>
+          commands:
+            enableSites:
+              command: 'sudo a2ensite solution-arch.com.conf'
+            disableSites:
+              command: 'sudo a2dissite 000-default.conf'
+        configureGIT:
+          files:
+            '/home/ubuntu/.ssh/git_id_rsa':
+              content: !Sub |
+                -----BEGIN RSA PRIVATE KEY-----
+                MIICXQIBAAKBgQCipYkEbU9W1VR/ZkA0ezLSv2aL5c81jA6FjidTI9TgYHgG0a3G
+                GwEZs7fjbJx24SxrjIfB39FOXGeVj5yXKqOpdsq3GtTDEJv3hIvXYRl88OSwZOsa
+                B1lH8BL7P4E0j+jIp40+uQENd6DSaCNkvF01qrOTaENtrqoVOuBrpGx0UwIDAQAB
+                AoGAQWRGc1YzeNjqURJeK/uAUoULiKGLrp6x0/Z0TxPv6Yo/l5ZDxItk5N2ByFkJ
+                iy46+r6Uclk3QMccCmCj9474H20DJU8c3rccPvV+xSu4vi9G6ntTMd1Gr25xrUpC
+                K9SCh2PK1vVc/8DkwsReMXyivV486ffrbmgM/lmdIjuDm2kCQQDNIzQxD22+tLL+
+                taI7s0AyK/TnRW8edyRacltU/1Kx3j445a57dbnt+oN3nwh40ddn9mKN/A0/q2/c
+                xlvsiXudAkEAyvlJHxbNKexqlPUCfkAphu7QAhNnsQ+kAYAPYqXPa5YWwOff1Guc
+                7nIIAO/gTWnUVhcMuLAIDfWxofYnTUSErwJBAI6UTF9ZGO83Cz4sIpGaGiGFGdhx
+                EzW6m6Ld3wsp12FXVioXwfl/rvZwa1YGTE4lk7Fnt8J2EQNS9hIeMKAsQqUCQG5D
+                /PBRv8U9tS0U6XTSwHyYMhJenl83Qv65piION9+XmubTUOqiR4/WDPkNV4pWqs7W
+                GMgggU+sIQL+qZ01UusCQQCoZsYaGHYsZfsA09hp/4yLlYOQBZhejM0m2dBsqTnQ
+                tijWfAsJh5gDgQmzOZBE0SsHKQu0pS5mSBu0Y4S9xYRj
+                -----END RSA PRIVATE KEY-----
+              mode: '000400'
+              owner: ubuntu
+              group: ubuntu
+          commands:
+            1addSSHKeyUbuntu:
+              command: 'ssh-keyscan github.com >> /home/ubuntu/.ssh/known_hosts'
+            2addSSHKey:
+              command: 'ssh-keyscan github.com >> /root/.ssh/known_hosts'
+        deployCode:
+          commands:
+            1pullCode:
+              command: 'eval $(ssh-agent -s) && ssh-add /home/ubuntu/.ssh/git_id_rsa && git clone git@github.com:ameenibrahim/static-site.git'
+              cwd : "/home/ubuntu/"
+            2makeDeployDir:
+              command: 'sudo mkdir -p /webMnt/www/html'
+            3copyCode:
+              command: 'sudo cp -r /home/ubuntu/static-site/html/* /webMnt/www/html/'
+              cwd : "~"
+            4editIndex:
+              command: 'sudo find /webMnt/www/html/ -type f -name "*.html" -exec sed -i "s/<Server_Type>/linux/g" {} \;'
+              cwd: "/webMnt/www/html/"
+            5changePerm:
+              command: 'sudo chmod -R 755 /webMnt/www'
+            6restartApache:
+              command: 'sudo service apache2 restart'
+
         config-cfn-hup:
           files:
             #cfn-hup configuration 
@@ -332,11 +450,11 @@ Resources:
               content: !Sub |
                 [cfn-auto-reloader-hook]
                 triggers=post.update
-                path=Resources.LaunchConfig.Metadata.AWS::CloudFormation::Init
-                action=/usr/local/bin/cfn-init -v --stack ${AWS::StackId} --resource LaunchConfig --region ${AWS::Region}
-            #upstart service 
+                path=Resources.NixLaunchConfig.Metadata.AWS::CloudFormation::Init
+                action=/usr/local/bin/cfn-init -v --stack ${AWS::StackId} --resource NixLaunchConfig --region ${AWS::Region}
+            #Upstart service 
             '/etc/init/cfn-hup.conf': 
-              content: |
+              content: !Sub |
                 author "Ameen-DevOps"
                 description "Cloud formation helper daemon"
                 version "1.0"
@@ -359,27 +477,33 @@ Resources:
           #       files:
           #         - /etc/cfn/cfn-hup.conf
           #         - /etc/cfn/hooks.d/cfn-auto-reloader.conf
-          commands:
+          commands: 
             enable-cfn-hup:
-              command: "initctl reload-configuration"
+              command: "sudo initctl reload-configuration" 
             start-cfn-hup:
-              command: "initctl start cfn-hup"
+              command: "initctl status cfn-hup | grep 'stop' > /dev/null && sudo initctl start cfn-hup"
 
     Properties:
-      AssociatePublicIpAddress: 'false'
-      ImageId: !FindInMap [ !Ref Region, EC2-Params, Ec2AMIID ]
+      AssociatePublicIpAddress: 'true'
+      BlockDeviceMappings:
+        - DeviceName: "/dev/sdf"
+          Ebs:
+            DeleteOnTermination: true
+            VolumeSize: '1'
+            VolumeType: 'gp2'
+      ImageId: !FindInMap [ !Ref Region, NixEC2Params, Ec2AMIID ]
       SecurityGroups:
-        - !Ref EC2InstanceSG
+        - !Ref PublicEC2InstanceSG
       KeyName: !Ref KeyName
-      InstanceType: !FindInMap [ !Ref Region, EC2-Params , Ec2InstanceType ]
+      InstanceType: !FindInMap [ !Ref Region, NixEC2Params , Ec2InstanceType ]
       UserData:
         Fn::Base64: !Sub |
           #!bin/bash -xe
           apt-get update 
           apt-get -y install python-setuptools
           easy_install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-latest.tar.gz
-          /usr/local/bin/cfn-init -v --stack ${AWS::StackId} --resource LaunchConfig --region ${AWS::Region}
-          /usr/local/bin/cfn-signal -e $? --stack ${AWS::StackId} --resource Ec2ASGroup --region ${AWS::Region}
+          /usr/local/bin/cfn-init -v --stack ${AWS::StackId} --resource NixLaunchConfig --region ${AWS::Region}
+          /usr/local/bin/cfn-signal -e $? --stack ${AWS::StackId} --resource NixEc2ASGroup --region ${AWS::Region}
 
 
   CPUAlarmHigh:
@@ -396,7 +520,7 @@ Resources:
         - !Ref Ec2ScaleUpPolicy
       Dimensions:
         - Name: AutoScalingGroupName
-          Value: !Ref Ec2ASGroup
+          Value: !Ref NixEc2ASGroup
       ComparisonOperator: GreaterThanThreshold
 
 
@@ -414,14 +538,14 @@ Resources:
         - !Ref Ec2ScaleDownPolicy
       Dimensions:
         - Name: AutoScalingGroupName
-          Value: !Ref Ec2ASGroup
+          Value: !Ref NixEc2ASGroup
       ComparisonOperator: LessThanThreshold
       
   Ec2ScaleUpPolicy:
     Type: 'AWS::AutoScaling::ScalingPolicy'
     Properties:
       AdjustmentType: ChangeInCapacity
-      AutoScalingGroupName: !Ref Ec2ASGroup
+      AutoScalingGroupName: !Ref NixEc2ASGroup
       Cooldown: '60'
       ScalingAdjustment: '1'
 
@@ -429,7 +553,7 @@ Resources:
     Type: 'AWS::AutoScaling::ScalingPolicy'
     Properties:
       AdjustmentType: ChangeInCapacity
-      AutoScalingGroupName: !Ref Ec2ASGroup
+      AutoScalingGroupName: !Ref NixEc2ASGroup
       Cooldown: '60'
       ScalingAdjustment: '-1'
 
