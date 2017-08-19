@@ -106,13 +106,13 @@ Resources:
   ### It's reccomended to NOT provide 'RoleName' by AWS Documentation in the ROLE Type
   #
 
-  # ScreenShotS3Bucket:
-  #   Type: AWS::S3::Bucket
-  #   Properties:
-  #     AccessControl: "PublicRead"
-  #     BucketName: !Ref S3BucketName
-  #     VersioningConfiguration:
-  #       Status: Enabled
+  ScreenShotS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      AccessControl: "PublicRead"
+      BucketName: !Ref S3BucketName
+      VersioningConfiguration:
+        Status: Enabled
 
   # API instance Role
   EC2Role:
@@ -144,7 +144,7 @@ Resources:
               - "s3:ListAllMyBuckets"
               - "s3:GetObjectAcl"
               - "s3:PutObject"
-            Resource: "arn:aws:s3:::ameen-github"
+            Resource: !Ref ScreenShotS3Bucket
       Roles: 
         - !Ref EC2Role
   EC2Profile:
