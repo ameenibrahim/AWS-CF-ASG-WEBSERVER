@@ -323,8 +323,8 @@ Resources:
       HealthCheckType: 'ELB'
       HealthCheckGracePeriod: 180
       DesiredCapacity: !Ref InstanceCount
-      TerminationPolicies:
-        - OldestLaunchConfiguration
+      # TerminationPolicies:
+      #   - OldestLaunchConfiguration
       LoadBalancerNames:
         - !Ref StackELB
       NotificationConfiguration:
@@ -584,8 +584,8 @@ Resources:
       HealthCheckType: 'ELB'
       HealthCheckGracePeriod: 600
       DesiredCapacity: !Ref InstanceCount
-      TerminationPolicies:
-        - OldestLaunchConfiguration
+      # TerminationPolicies:
+      #   - OldestLaunchConfiguration
       LoadBalancerNames:
         - !Ref StackELB
       NotificationConfiguration:
