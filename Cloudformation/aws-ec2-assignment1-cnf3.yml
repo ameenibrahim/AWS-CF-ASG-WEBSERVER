@@ -1,0 +1,99 @@
+# Author: Ameen Ibrahim Raffic
+# Version: 1.1
+# Description: This cfn template creates a web server auto scaling group with apache2 on linux in one region
+#              and IIS in windows in another
+---
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "CloudFront for the S3 images bucket"
+
+# All parameters are set during stack creation/update
+Parameters:
+
+  RDomain:
+    Description: The Domain Name
+    Type: String
+  # Mention a unique S3 bucket name (The region will be same as CFN execution region)
+  # LogBucketName: 
+  #   Description: S3 Bucket Name
+  #   Type: String
+  
+  # Sets the target region
+  Region:
+    Description: Region to launch/update the stack
+    Type: String
+    AllowedValues:
+      - APSOUTHEAST1
+    Default: "APSOUTHEAST1"
+    ConstraintDescription: Invalid region specified
+
+Resources:
+  
+  
+  # LogBuckets:
+  #   Type: AWS::S3::Bucket
+  #   Properties:
+  #     AccessControl: "PublicRead"
+  #     BucketName: !Ref LogBucketName
+
+  CFNDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Origins:
+        - DomainName: images.e-zerve.com.s3-website-ap-southeast-1.amazonaws.com
+          Id: ImgS3Origin
+          CustomOriginConfig:
+            HTTPPort: '80'
+            HTTPSPort: '443'
+            OriginProtocolPolicy: http-only
+        Enabled: 'true'
+        Comment: "This CDN is for serving images"
+        DefaultRootObject: index.html
+        # Logging:
+        #   IncludeCookies: 'false'
+        #   Bucket: !Ref LogBuckets
+        #   Prefix: "img-eze-"
+        Aliases:
+          - images.e-zerve.com
+        DefaultCacheBehavior:
+          AllowedMethods:
+          - DELETE
+          - GET
+          - HEAD
+          - OPTIONS
+          - PATCH
+          - POST
+          - PUT
+          TargetOriginId: ImgS3Origin
+          ForwardedValues:
+            QueryString: 'false'
+            Cookies:
+              Forward: none
+          ViewerProtocolPolicy: allow-all
+        PriceClass: PriceClass_200
+        # Restrictions:
+        #   GeoRestriction:
+        #     RestrictionType: whitelist
+        #     Locations:
+        #     - AQ
+        #     - CV
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: 'true'
+  
+  
+  CDNDNSRecord:
+      Type: AWS::Route53::RecordSet
+      Properties:
+        HostedZoneId: "Z1AH5BU4HVLNT5"
+        Comment: DNS name for the ELB.
+        Name: !Join ['', [images, .,  e-zerve.com, .]]
+        Type: CNAME
+        TTL: '300'
+        ResourceRecords:
+        - !GetAtt CFNDistribution.DomainName
+  
+# Outputs:
+  
+#   ELBDNS:
+#     Description: StackELB.DNSName
+#     Value: !GetAtt StackELB.DNSName

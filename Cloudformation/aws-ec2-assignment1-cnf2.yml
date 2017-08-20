@@ -50,12 +50,15 @@ Parameters:
     Description: VpcId of your existing Virtual Private Cloud (VPC)
     ConstraintDescription: Select fromt the list of VPC
 
-  PrivateSubnets:
+  WinSubnets:
     Type: 'List<AWS::EC2::Subnet::Id>'
-    Description: The list of Private SubnetIds (NATed) in your Virtual Private Cloud (VPC)
-    ConstraintDescription: >-
-      Atleast two existing subnets associated with at least two different availability zones. 
-      They should belong to the selected VPC
+    Description: The Windows Public Subnet
+    ConstraintDescription: Enter a valid Subnet
+  
+  NixSubnets:
+    Type: 'List<AWS::EC2::Subnet::Id>'
+    Description: The Linux Public Subnet
+    ConstraintDescription: Enter a valid Subnet
 
   PublicSubnets:
     Type: 'List<AWS::EC2::Subnet::Id>'
@@ -144,7 +147,7 @@ Resources:
               - "s3:ListAllMyBuckets"
               - "s3:GetObjectAcl"
               - "s3:PutObject"
-            Resource: !Ref ScreenShotS3Bucket
+            Resource: !GetAtt ScreenShotS3Bucket.Arn
       Roles: 
         - !Ref EC2Role
   EC2Profile:
@@ -190,7 +193,7 @@ Resources:
         Target: "TCP:80"
         Timeout:  '5'
         Interval: '10'
-        UnhealthyThreshold: '2'
+        UnhealthyThreshold: '10'
         HealthyThreshold: '3'
       ConnectionSettings:
         IdleTimeout: '60'
@@ -309,8 +312,12 @@ Resources:
   NixEc2ASGroup:
     Type: 'AWS::AutoScaling::AutoScalingGroup'
     Properties:
-      VPCZoneIdentifier: !Ref PublicSubnets
+      VPCZoneIdentifier: !Ref NixSubnets
       LaunchConfigurationName: !Ref NixLaunchConfig
+      Tags:
+        - Key: "Name"
+          Value: "Nix-EC2-WebServer"
+          PropagateAtLaunch: "true"
       MinSize: '1'
       MaxSize: '2'
       HealthCheckType: 'ELB'
@@ -327,12 +334,12 @@ Resources:
             - 'autoscaling:EC2_INSTANCE_TERMINATE_ERROR'
     CreationPolicy:
       ResourceSignal:
-        Timeout: PT60M
+        Timeout: PT5M
     UpdatePolicy:
       AutoScalingRollingUpdate:
         MinInstancesInService: '1'
         MaxBatchSize: '1'
-        PauseTime: PT60M
+        PauseTime: PT5M
         WaitOnResourceSignals: 'true'
 
   NixLaunchConfig:
@@ -420,6 +427,9 @@ Resources:
             2addSSHKey:
               command: 'ssh-keyscan github.com >> /root/.ssh/known_hosts'
         deployCode:
+          # This can be used to pull code (see in windows example)
+          # sources:
+          #   /webMnt: "https://github.com/ameenibrahim/static-site/tarball/master"
           commands:
             1pullCode:
               command: 'eval $(ssh-agent -s) && ssh-add /home/ubuntu/.ssh/git_id_rsa && git clone git@github.com:ameenibrahim/static-site.git'
@@ -556,6 +566,261 @@ Resources:
       AutoScalingGroupName: !Ref NixEc2ASGroup
       Cooldown: '60'
       ScalingAdjustment: '-1'
+
+
+  WinEc2ASGroup:
+    Type: 'AWS::AutoScaling::AutoScalingGroup'
+    Properties:
+      VPCZoneIdentifier: !Ref WinSubnets
+      LaunchConfigurationName: !Ref WinLaunchConfig
+      Tags:
+        - Key: "Name"
+          Value: "Win-EC2-WebServer"
+          PropagateAtLaunch: "true"
+      MinSize: '1'
+      MaxSize: '2'
+      HealthCheckType: 'ELB'
+      HealthCheckGracePeriod: 600
+      DesiredCapacity: !Ref InstanceCount
+      LoadBalancerNames:
+        - !Ref StackELB
+      NotificationConfiguration:
+          TopicARN: !Ref NotificationTopic
+          NotificationTypes:
+            - 'autoscaling:EC2_INSTANCE_LAUNCH'
+            - 'autoscaling:EC2_INSTANCE_LAUNCH_ERROR'
+            - 'autoscaling:EC2_INSTANCE_TERMINATE'
+            - 'autoscaling:EC2_INSTANCE_TERMINATE_ERROR'
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT10M
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MinInstancesInService: '1'
+        MaxBatchSize: '1'
+        PauseTime: PT10M
+        WaitOnResourceSignals: 'true'
+
+  WinLaunchConfig:
+    Type: 'AWS::AutoScaling::LaunchConfiguration'
+    Metadata:
+      #BuildNumber: !Ref BuildNumber
+      AWS::CloudFormation::Init:
+        configSets:
+          default:
+            - config-cfn-hup
+            - configureIIS
+            - installPackages
+            - mountEBS
+            - pullCode
+            - deployCode
+        
+        configureIIS:
+          commands:
+            InstallIIS:
+              command: 'powershell.exe -Command Install-WindowsFeature -name Web-Server -IncludeManagementTools'
+              waitAfterCompletion: "10"
+            
+        installPackages:
+          files:
+            'c:\cfn\mountEBS.ps1':
+              content: !Sub |
+                $diskNumber = (Get-Disk | ? { ($_.OperationalStatus -eq "Offline") -and ($_."PartitionStyle" -eq "RAW") }).Number
+                Initialize-Disk -Number $diskNumber -PartitionStyle "MBR"
+                $part = New-Partition -DiskNumber $diskNumber -UseMaximumSize -IsActive -AssignDriveLetter
+                Format-Volume -DriveLetter $part.DriveLetter -Confirm:$TRUE
+
+            'c:\cfn\replaceString.ps1':
+              content: !Sub |
+                $configFiles = Get-ChildItem d:\webMnt\www\html\* -include *.html -rec
+                foreach ($file in $configFiles){
+                  Try {
+                    (Get-Content $file.pspath) | ForEach-Object {$_ -replace '<Server_Type>', 'Windows'} | Set-Content $file.pspath
+                  }
+                  Catch {
+                  $tempfile = Convert-Path -path $file.PSPath
+                  $message = "Could not replace Server_Type in " + $tempfile +". This is usually caused by a permissions issue. The string may or may not exist."
+                  $message
+                  }
+                }
+            'c:\cfn\deployCode.ps1':
+              content: !Sub |
+                new-item -type directory -path d:\\webMnt\\www\\html -Force
+                c:\\cfn\\replaceString.ps1
+                new-website -name WinEC2WebServer -port 80 -physicalpath d:\webMnt\www\html -force
+                remove-website -name "Default Web Site"
+                start-website -name WinEC2WebServer
+        #Get-ChildItem -Path "D:\\webMnt\\www\\ameenibrahim-static-site-af650e3\\ameenibrahim-static-site-af650e3\\html" -Recurse | Move-Item -destination "D:\\webMnt\\www\\html"
+        mountEBS:
+          commands:
+            1checkMakeFSCommand:
+              command: 'powershell.exe -Command c:\\cfn\\mountEBS.ps1'
+              waitAfterCompletion: "10"
+        # configureIIS:
+        pullCode:
+          sources:
+            d:\webMnt\www: "https://github.com/ameenibrahim/static-site/zipball/master"
+        deployCode:
+          commands:
+            deployCodeCmd:
+              command: 'powershell.exe -Command c:\\cfn\\deployCode.ps1'
+              waitAfterCompletion: "30"
+        config-cfn-hup:
+          files:
+            #cfn-hup configuration 
+            'c:\cfn\cfn-hup.conf':
+              content: !Sub |
+                [main]
+                stack=${AWS::StackId}
+                region=${AWS::Region}
+                interval=1
+            'c:\cfn\hooks.d\cfn-auto-reloader.conf':
+              content: !Sub |
+                [cfn-auto-reloader-hook]
+                triggers=post.update
+                path=Resources.WinLaunchConfig.Metadata.AWS::CloudFormation::Init
+                action=cfn-init.exe -v --stack ${AWS::StackId} --resource WinLaunchConfig --region ${AWS::Region}
+          services:
+            windows:
+              cfn-hup:
+                enabled: 'true'
+                ensureRunning: 'true'
+                files:
+                  - 'c:\cfn\cfn-hup.conf'
+                  - 'c:\cfn\hooks.d\cfn-auto-reloader.conf'
+
+    Properties:
+      AssociatePublicIpAddress: 'true'
+      BlockDeviceMappings:
+        - DeviceName: "/dev/sdf"
+          Ebs:
+            DeleteOnTermination: true
+            VolumeSize: '1'
+            VolumeType: 'gp2'
+      ImageId: !FindInMap [ !Ref Region, WinEC2Params, Ec2AMIID ]
+      SecurityGroups:
+        - !Ref PublicEC2InstanceSG
+      KeyName: !Ref KeyName
+      InstanceType: !FindInMap [ !Ref Region, WinEC2Params , Ec2InstanceType ]
+      UserData: !Base64 
+        'Fn::Join':
+          - ''
+          - - |
+              <script>
+            - 'cfn-init.exe -v --stack '
+            - !Ref 'AWS::StackId'
+            - ' --resource WinLaunchConfig'
+            - ' --region '
+            - !Ref 'AWS::Region'
+            - |+
+
+            - 'cfn-signal.exe -e %ERRORLEVEL% --stack '
+            - !Ref 'AWS::StackId'
+            - ' --resource WinEc2ASGroup'
+            - ' --region '
+            - !Ref 'AWS::Region'
+            - |+
+
+            - 'cfn-signal.exe -s true '
+            - !Base64 
+              Ref: WinWaitHandle
+            - |+
+
+            - </script>
+
+  WinWaitHandle:
+    Type: 'AWS::CloudFormation::WaitConditionHandle'
+
+  WinWaitCondition:
+    Type: 'AWS::CloudFormation::WaitCondition'
+    DependsOn: WinLaunchConfig
+    Properties:
+      Handle: !Ref WinWaitHandle
+      Timeout: '400'
+
+  WinCPUAlarmHigh:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: Scale-up if CPU > 80% for 10 minutes
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Statistic: Average
+      Period: '300'
+      EvaluationPeriods: '2'
+      Threshold: '80'
+      AlarmActions:
+        - !Ref WinEc2ScaleUpPolicy
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value: !Ref WinEc2ASGroup
+      ComparisonOperator: GreaterThanThreshold
+
+
+  WinCPUAlarmLow:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: Scale-down if CPU < 60% for 10 minutes
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Statistic: Average
+      Period: '300'
+      EvaluationPeriods: '2'
+      Threshold: '60'
+      AlarmActions:
+        - !Ref WinEc2ScaleDownPolicy
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value: !Ref WinEc2ASGroup
+      ComparisonOperator: LessThanThreshold
+      
+  WinEc2ScaleUpPolicy:
+    Type: 'AWS::AutoScaling::ScalingPolicy'
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName: !Ref WinEc2ASGroup
+      Cooldown: '300'
+      ScalingAdjustment: '1'
+
+  WinEc2ScaleDownPolicy:
+    Type: 'AWS::AutoScaling::ScalingPolicy'
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName: !Ref WinEc2ASGroup
+      Cooldown: '300'
+      ScalingAdjustment: '-1'
+
+  StackDNSRecord:
+      Type: AWS::Route53::RecordSet
+      Properties:
+        HostedZoneId: "Z1AH5BU4HVLNT5"
+        Comment: DNS name for the ELB.
+        Name: !Join ['', [asa, .,  e-zerve.com, .]]
+        Type: CNAME
+        TTL: '300'
+        ResourceRecords:
+        - !GetAtt StackELB.DNSName
+
+  PublicReadForGetBucketObjects: 
+    Type: "AWS::S3::BucketPolicy"
+    Properties: 
+      Bucket: 
+        Ref: "ScreenShotS3Bucket"
+      PolicyDocument: 
+        Statement: 
+          - 
+            Action: 
+              - "s3:GetObject"
+            Effect: "Allow"
+            Resource: 
+              Fn::Join: 
+                - ""
+                - 
+                  - "arn:aws:s3:::"
+                  - 
+                    Ref: "ScreenShotS3Bucket"
+                  - "/*"
+            Principal: "*"
+
 
 
 Outputs:

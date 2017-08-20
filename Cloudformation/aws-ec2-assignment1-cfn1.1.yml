@@ -1,0 +1,166 @@
+# Author: Ameen Ibrahim Raffic
+# Version: 1.1
+# Description: This cfn template creates a web server auto scaling group with apache2 on linux in one region
+#              and IIS in windows in another
+---
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "VPC creation"
+
+# All parameters are set during stack creation/update
+Parameters:
+  # Sets the target environment
+  VPCName: 
+    Description: Set the VPC name
+    Type: String
+
+  # Sets the target region
+  Region:
+    Description: Region to launch/update the stack
+    Type: String
+    AllowedValues:
+      - AP-SOUTHEAST
+    Default: "AP-SOUTHEAST"
+    ConstraintDescription: Invalid region specified
+
+# Organized by region, then by environment
+# The name of the Stack will be configured as <environment>-<product>-<region> for e.g PROD-ECOM-US-EAST-API-01 
+
+Mappings:
+  APSOUTHEAST1:
+    DisplayName:
+      name: "AP-SOUTHEAST"
+    VPC-Params:
+      Ec2AMIID: "ami-2d39803a"
+      Ec2InstanceType: "t2.micro"
+      Ec2InstanceRootVolumeSize: "8"
+
+
+# AWS Resource Definitions
+Resources:
+  VPC:
+    Type: 'AWS::EC2::VPC'
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Ref VPCName
+      CidrBlock: 10.11.11.0/24
+      EnableDnsSupport: 'true'
+      EnableDnsHostnames: 'true'
+
+  NixPublicSubnet:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      MapPublicIpOnLaunch: 'true'
+      AvailabilityZone: "ap-southeast-1a"
+      VpcId: !Ref VPC
+      CidrBlock: 10.11.11.0/26
+      Tags:
+        - Key: "Name"
+          Value: "NixSubnet-Public"
+
+  WinPublicSubnet:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      MapPublicIpOnLaunch: 'true'
+      AvailabilityZone: "ap-southeast-1b"
+      VpcId: !Ref VPC
+      CidrBlock: 10.11.11.64/26
+      Tags:
+        - Key: "Name"
+          Value: "WinSubnet-Public"
+
+  Nix2PublicSubnet:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      MapPublicIpOnLaunch: 'true'
+      AvailabilityZone: "ap-southeast-1a"
+      VpcId: !Ref VPC
+      CidrBlock: 10.11.11.128/26
+      Tags:
+        - Key: "Name"
+          Value: "NixSubnet-Public-2"
+
+  Win2PublicSubnet:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      MapPublicIpOnLaunch: 'true'
+      AvailabilityZone: "ap-southeast-1b"
+      VpcId: !Ref VPC
+      CidrBlock: 10.11.11.192/26
+      Tags:
+        - Key: "Name"
+          Value: "WinSubnet-Public-2"
+
+  VPCInternetGateway:
+    Type: 'AWS::EC2::InternetGateway'
+    Properties: {}
+
+  VPCAttachInternetGateway:
+    Type: 'AWS::EC2::VPCGatewayAttachment'
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref VPCInternetGateway
+
+  VPCRouteTablePublic:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      Tags:
+        - Key: Name
+          Value: VPCRouteTable-Public
+      VpcId: !Ref VPC
+
+
+  NixPublicSubnetRouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref NixPublicSubnet
+      RouteTableId: !Ref VPCRouteTablePublic
+
+  WinPublicSubnetRouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref WinPublicSubnet
+      RouteTableId: !Ref VPCRouteTablePublic
+
+  Nix2PublicSubnetRouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref Nix2PublicSubnet
+      RouteTableId: !Ref VPCRouteTablePublic
+
+  Win2PublicSubnetRouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref Win2PublicSubnet
+      RouteTableId: !Ref VPCRouteTablePublic
+
+
+  RouteVPCPublic:
+    Type: 'AWS::EC2::Route'
+    DependsOn: VPCAttachInternetGateway
+    Properties:
+      RouteTableId: !Ref VPCRouteTablePublic
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref VPCInternetGateway
+
+Outputs:
+
+  VPCID:
+    Description: VPC.Id
+    Value: !Ref VPC
+
+  NixPublicSubnetID:
+    Description: NixPublicSubnet.Id
+    Value: !Ref NixPublicSubnet
+  
+  Nix2PublicSubnetID:
+    Description: Nix2PublicSubnet.Id
+    Value: !Ref Nix2PublicSubnet
+
+  WinPublicSubnetID:
+    Description: WinPublicSubnet.Id
+    Value: !Ref WinPublicSubnet
+
+  Win2PublicSubnetID:
+    Description: Win2PublicSubnet.Id
+    Value: !Ref Win2PublicSubnet
